@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Lens &amp; Learn — Point Your Camera &amp; Learn | Pollinations</title>
+    <script defer src="https://cdn.jsdelivr.net/npm/@pollinations/ui@0.1.0-alpha.20/dist/connect.js"></script>
+    <style>
+        :root { --bg: #0a0f18; --card: #111827; --border: #1f2937; --text: #f9fafb; --muted: #9ca3af; --accent: #34d399; }
+        * { box-sizing: border-box; }
+        body { margin: 0; font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); min-height: 100dvh; display: flex; flex-direction: column; }
+        header { display: flex; justify-content: space-between; align-items: center; padding: 0.85rem 1rem; background: var(--card); border-bottom: 1px solid var(--border); gap: 0.75rem; flex-wrap: wrap; }
+        .brand { display: flex; align-items: center; gap: 0.6rem; }
+        .brand h1 { margin: 0; font-size: 1.1rem; }
+        main { max-width: 640px; width: 100%; margin: 1rem auto; padding: 0 0.85rem; display: flex; flex-direction: column; gap: 1rem; flex: 1; }
+        .viewer { position: relative; background: #000; border-radius: 14px; overflow: hidden; border: 1px solid var(--border); aspect-ratio: 4/3; display: flex; align-items: center; justify-content: center; }
+        video, img#preview { width: 100%; height: 100%; object-fit: cover; }
+        .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 0.65rem; }
+        select, button, label.upload { font: inherit; border-radius: 10px; border: 1px solid var(--border); background: var(--card); color: var(--text); padding: 0.7rem 0.9rem; text-align: center; cursor: pointer; }
+        button.primary { background: var(--accent); color: #022c22; font-weight: 700; border: none; grid-column: span 2; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        .result { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 1rem; white-space: pre-wrap; line-height: 1.55; min-height: 120px; }
+        footer { text-align: center; padding: 0.85rem; color: var(--muted); font-size: 0.82rem; }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="brand">
+            <h1>Lens &amp; Learn</h1>
+            <a href="https://pollinations.ai/?ref=badge" target="_blank" rel="noopener">
+                <img src="https://raw.githubusercontent.com/pollinations/pollinations/main/packages/ui/src/brand/badge-made-with.svg" alt="Made with pollinations.ai" height="22" />
+            </a>
+        </div>
+        <polli-connect id="polliConnect"></polli-connect>
+    </header>
+
+    <main>
+        <div class="viewer">
+            <video id="video" autoplay playsinline muted></video>
+            <img id="preview" alt="Captured object" style="display:none;" />
+        </div>
+
+        <div class="controls">
+            <button id="camBtn" type="button">Start Camera</button>
+            <label class="upload">
+                Upload Photo
+                <input id="fileInput" type="file" accept="image/*" capture="environment" style="display:none;" />
+            </label>
+            <select id="learnMode">
+                <option value="explain">Explain what this is &amp; how it works</option>
+                <option value="vocab">Translate &amp; teach vocabulary (EN / ES / FR / FA)</option>
+                <option value="plant_science">Identify species, materials &amp; science facts</option>
+            </select>
+            <button id="listenBtn" type="button" disabled>Listen (Audio)</button>
+            <button id="analyzeBtn" class="primary" type="button">Snap &amp; Learn</button>
+        </div>
+
+        <div id="result" class="result">Sign in with Pollinations, start your camera (or upload a photo), and tap Snap &amp; Learn.</div>
+    </main>
+
+    <footer>
+        Powered by <a href="https://pollinations.ai/?ref=badge" style="color:var(--accent)">pollinations.ai</a>
+    </footer>
+
+    <script>
+        const connectEl = document.getElementById("polliConnect");
+        const video = document.getElementById("video");
+        const preview = document.getElementById("preview");
+        const camBtn = document.getElementById("camBtn");
+        const fileInput = document.getElementById("fileInput");
+        const learnMode = document.getElementById("learnMode");
+        const analyzeBtn = document.getElementById("analyzeBtn");
+        const listenBtn = document.getElementById("listenBtn");
+        const resultEl = document.getElementById("result");
+
+        let stream = null;
+        let uploadedDataUrl = null;
+        let lastExplanation = "";
+
+        camBtn.addEventListener("click", async () => {
+            if (stream) {
+                stream.getTracks().forEach((t) => t.stop());
+                stream = null;
+                video.srcObject = null;
+                camBtn.textContent = "Start Camera";
+                return;
+            }
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+                video.srcObject = stream;
+                video.style.display = "block";
+                preview.style.display = "none";
+                uploadedDataUrl = null;
+                camBtn.textContent = "Stop Camera";
+            } catch (err) {
+                resultEl.textContent = `Camera unavailable (${err.message}). You can use Upload Photo instead.`;
+            }
+        });
+
+        fileInput.addEventListener("change", () => {
+            const file = fileInput.files?.[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = () => {
+                uploadedDataUrl = reader.result;
+                preview.src = uploadedDataUrl;
+                preview.style.display = "block";
+                video.style.display = "none";
+            };
+            reader.readAsDataURL(file);
+        });
+
+        function captureDataUrl() {
+            if (uploadedDataUrl) return uploadedDataUrl;
+            if (!stream || !video.videoWidth) return null;
+            const c = document.createElement("canvas");
+            c.width = video.videoWidth;
+            c.height = video.videoHeight;
+            c.getContext("2d").drawImage(video, 0, 0);
+            return c.toDataURL("image/jpeg", 0.85);
+        }
+
+        analyzeBtn.addEventListener("click", async () => {
+            const apiKey = connectEl.apiKey;
+            if (!apiKey) {
+                resultEl.textContent = "Please sign in with the Pollinations button first.";
+                return;
+            }
+            const dataUrl = captureDataUrl();
+            if (!dataUrl) {
+                resultEl.textContent = "Start the camera or upload a photo first.";
+                return;
+            }
+
+            analyzeBtn.disabled = true;
+            resultEl.textContent = "Inspecting image...";
+            const prompts = {
+                explain: "Identify the main object or scene in this photo. Explain clearly what it is, how it works, and 2 interesting facts.",
+                vocab: "Identify the main object in this photo and teach its name + a short example sentence in English, Spanish, French, and Persian.",
+                plant_science: "Identify the object, material, or organism in this photo and share its scientific/technical background.",
+            };
+
+            try {
+                const res = await fetch("https://gen.pollinations.ai/v1/chat/completions", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Authorization": `Bearer ${apiKey}`,
+                    },
+                    body: JSON.stringify({
+                        model: "openai",
+                        messages: [{
+                            role: "user",
+                            content: [
+                                { type: "text", text: prompts[learnMode.value] },
+                                { type: "image_url", image_url: { url: dataUrl } },
+                            ],
+                        }],
+                    }),
+                });
+                if (!res.ok) throw new Error(`API error (${res.status})`);
+                const data = await res.json();
+                lastExplanation = data?.choices?.[0]?.message?.content || "No description returned.";
+                resultEl.textContent = lastExplanation;
+                listenBtn.disabled = false;
+            } catch (err) {
+                resultEl.textContent = `Error: ${err.message}`;
+            } finally {
+                analyzeBtn.disabled = false;
+            }
+        });
+
+        listenBtn.addEventListener("click", async () => {
+            const apiKey = connectEl.apiKey;
+            if (!apiKey || !lastExplanation) return;
+            listenBtn.disabled = true;
+            try {
+                const snippet = lastExplanation.slice(0, 350);
+                const res = await fetch(`https://gen.pollinations.ai/audio/${encodeURIComponent(snippet)}?voice=nova`, {
+                    headers: { "Authorization": `Bearer ${apiKey}` },
+                });
+                if (!res.ok) throw new Error(`Audio error (${res.status})`);
+                const blob = await res.blob();
+                new Audio(URL.createObjectURL(blob)).play();
+            } finally {
+                listenBtn.disabled = false;
+            }
+        });
+    </script>
+</body>
+</html>
